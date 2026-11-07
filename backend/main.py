@@ -3,6 +3,8 @@ import calendar
 import html
 import logging
 import os
+import re
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -10,12 +12,13 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 load_dotenv()
 
+from .art import ArtIndex
 from .database import DatabaseManager
 from .lb_client import ListenBrainzClient
 from .navidrome_client import NavidromeClient
@@ -46,9 +49,18 @@ def get_nav():
     return _nav_client
 
 
-stats_engine = StatsEngine(db)
+art_index = ArtIndex(db, get_nav)
+stats_engine = StatsEngine(db, art_index)
 scheduler = AsyncIOScheduler()
 _background_tasks: set[asyncio.Task] = set()
+
+# Cover art proxy: a small in-process LRU so repeated list renders do not refetch
+# from Navidrome. Memory-only (the pod has a read-only root) and size-capped.
+COVER_ID_RE = re.compile(r"^(?:al|ar)-[A-Za-z0-9]{1,40}(?:_[0-9a-f]{16})?$")
+ART_SIZES = (32, 64, 128, 256, 512)
+ART_CACHE_MAX_ENTRIES = 240
+ART_CACHE_MAX_BYTES = 64 * 1024
+_art_cache: "OrderedDict[tuple[str, int], tuple[str, bytes]]" = OrderedDict()
 
 
 def _spawn_background(coro):
@@ -249,6 +261,15 @@ async def scheduled_sync():
         await svc.sync_listens()
     except Exception as e:
         logger.error(f"sync failed: {e}")
+    await refresh_art_index()
+
+
+async def refresh_art_index():
+    """Mirror Navidrome's cover art. Never fatal: the site works without it."""
+    try:
+        await art_index.refresh()
+    except Exception as e:
+        logger.warning(f"cover-art index refresh failed: {e}")
 
 
 @asynccontextmanager
@@ -270,6 +291,9 @@ async def lifespan(app: FastAPI):
         # background: paging through a full ListenBrainz history can take a while
         # and should not block startup.
         _spawn_background(scheduled_sync())
+    # Load the cached cover-art index and refresh it when stale. Also background:
+    # a cold index costs a handful of Navidrome requests.
+    _spawn_background(art_index.startup())
     yield
     for task in list(_background_tasks):
         task.cancel()
@@ -304,6 +328,47 @@ async def api_range(from_: str | None = None, to_: str | None = None):
     end_ts = int(to_) if to_ else None
     s = await stats_engine.range_stats(start_ts, end_ts)
     return s
+
+
+@app.get("/api/art/{cover_id}")
+async def api_art(cover_id: str, size: int = 128):
+    """Proxy Navidrome cover art so the browser never sees its credentials."""
+    if not COVER_ID_RE.match(cover_id):
+        raise HTTPException(status_code=404)
+    size = min(ART_SIZES, key=lambda s: abs(s - size))
+    cached = _art_cache.get((cover_id, size))
+    if cached:
+        _art_cache.move_to_end((cover_id, size))
+        return Response(
+            content=cached[1],
+            media_type=cached[0],
+            headers={"Cache-Control": "public, max-age=2592000, immutable"},
+        )
+
+    try:
+        content_type, body = await get_nav().get_cover_art(cover_id, size)
+    except ValueError:  # Navidrome not configured
+        return Response(status_code=204)
+    except Exception as exc:
+        logger.debug("cover art %s unavailable: %s", cover_id, exc)
+        return Response(status_code=204)
+
+    if not content_type.startswith("image/"):
+        # Navidrome answers unknown ids with a JSON error payload, not an image.
+        logger.debug("cover art %s is not an image (%s)", cover_id, content_type)
+        return Response(status_code=204)
+
+    if len(body) <= ART_CACHE_MAX_BYTES:
+        _art_cache[(cover_id, size)] = (content_type, body)
+        _art_cache.move_to_end((cover_id, size))
+        while len(_art_cache) > ART_CACHE_MAX_ENTRIES:
+            _art_cache.popitem(last=False)
+
+    return Response(
+        content=body,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=2592000, immutable"},
+    )
 
 
 @app.get("/api/timeline")

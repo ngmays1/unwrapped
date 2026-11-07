@@ -17,6 +17,10 @@ FastAPI + vanilla-JS web UI.
   ListenBrainz year-in-review source on the API.
 - **Live endpoints**: Navidrome now-playing over `/api/live/now-playing` and a polling
   WebSocket at `/ws/live`; the dashboard itself does not surface them.
+- **Cover art**: album art and artist portraits in the top tracks / artists / albums
+  lists and the year-in-review page. Art is mirrored from the local Navidrome library
+  (name-matched, cached in `nav_art`) and proxied through `/api/art/{id}`, so no
+  credentials reach the browser and the page is unchanged when Navidrome is absent.
 - **Incremental sync**: nightly job that pages forward from a stored cursor, so new
   history accumulates without being re-fetched.
 - **History backfill**: on startup (and on each sync) the app pages *backwards* through
@@ -31,23 +35,25 @@ FastAPI + vanilla-JS web UI.
 ListenBrainz  ──►  lb_client  ──►  SyncService  ──►  SQLite (aiosqlite)
    (API)                          (scheduler)            │
                                                           ▼
-Navidrome    ──►  navidrome_client ─────────────►   StatsEngine
-   (API)                                                 │
-                                                         ▼
+Navidrome    ──►  navidrome_client ──┬──►  ArtIndex ──►  StatsEngine
+   (API)                             │     (nav_art)          │
+                                     └──►  art proxy ─────────┤
+                                                             ▼
                                         FastAPI routes / JSON APIs / fragments
-                                                         │
-                                                         ▼
-                                           ECharts frontend
+                                                             │
+                                                             ▼
+                                               ECharts frontend
 ```
 
 | Component | Responsibility |
 | --- | --- |
 | `backend/main.py` | FastAPI app, page routes, JSON APIs, HTML fragments, WebSocket, lifespan/scheduler wiring |
 | `backend/lb_client.py` | ListenBrainz API client with retry/backoff (listens and year-in-review) |
-| `backend/navidrome_client.py` | Navidrome/Subsonic client for now-playing and cover art |
+| `backend/navidrome_client.py` | Navidrome/Subsonic client for now-playing, library indexes, and cover art |
+| `backend/art.py` | `ArtIndex` — name-matched cover-art mirror of the Navidrome library |
 | `backend/scheduler.py` | `SyncService` — forward sync against `last_sync_ts` plus resumable backward history backfill |
 | `backend/stats.py` | `StatsEngine` — all aggregation (totals, top lists, histograms, timelines, month/year summaries) |
-| `backend/database.py` | Async SQLite manager (WAL mode) with `listens` and `meta` tables |
+| `backend/database.py` | Async SQLite manager (WAL mode) with `listens`, `meta`, and `nav_art` tables |
 | `backend/util.py` | Local timezone helper (`TZ`) |
 | `frontend/` | Jinja2 templates, self-hosted fonts, static JS (ECharts), and CSS |
 
@@ -116,12 +122,14 @@ NAVIDROME_PASSWORD=your-password
 | `SYNC_HOUR` | `2` | Hour of day (local) to run the nightly sync job |
 | `LISTENBRAINZ_USERNAME` | — | ListenBrainz username (**required** for sync) |
 | `LISTENBRAINZ_TOKEN` | — | ListenBrainz user token (**required** for sync) |
-| `NAVIDROME_URL` | — | Base URL of the Navidrome instance (required for live features) |
+| `NAVIDROME_URL` | — | Base URL of the Navidrome instance (required for live features and cover art) |
 | `NAVIDROME_USERNAME` | — | Navidrome username |
 | `NAVIDROME_PASSWORD` | — | Navidrome password |
 
 If ListenBrainz credentials are missing the app still starts; sync is disabled and
-warnings are logged. Missing Navidrome credentials only disable the live endpoints.
+warnings are logged. Missing Navidrome credentials only disable the live endpoints and
+cover art. Art also degrades gracefully when Navidrome is configured but unreachable:
+cached art ids still resolve, and the images simply drop out of the lists.
 
 ## API reference
 
@@ -135,6 +143,7 @@ warnings are logged. Missing Navidrome credentials only disable the live endpoin
 | `GET` | `/api/monthly/{year}/{month}` | HTML fragment monthly summary |
 | `GET` | `/api/wrapped/{year}` | JSON year-in-review (`source=lb\|local`, default `lb`) |
 | `GET` | `/api/live/now-playing` | Current Navidrome now-playing |
+| `GET` | `/api/art/{cover_id}` | Cover art proxied from Navidrome (`size` 32-512, snapped to the nearest step) |
 | `WS` | `/ws/live` | Pushes now-playing JSON every 5 seconds |
 | `POST` | `/api/sync` | Trigger a listen sync on demand |
 | `GET` | `/healthz` | Liveness/readiness probe |
@@ -146,7 +155,25 @@ SQLite tables created on startup (`backend/database.py`):
 - **`listens`** — one row per scrobble: `listened_at`, MBIDs, `artist_name`,
   `album_name`, `track_name`, `duration_ms`. Uniqueness on
   `(listened_at, track_name, artist_name)`; indexes on time, artist, and track.
-- **`meta`** — key/value store; holds the `last_sync_ts` cursor.
+- **`meta`** — key/value store; holds the `last_sync_ts` cursor and the backfill
+  checkpoints, plus `art_index_updated` (when the cover-art mirror was last refreshed).
+- **`nav_art`** — cover-art mirror of the Navidrome library: `cover_id`, `kind`
+  (`album`/`artist`), display `name`, normalized `norm_name`, `artist`, and MBID.
+  Rebuilt on startup when older than a day and after every nightly sync; it is
+  additive, so an install without Navidrome simply keeps it empty.
+
+## Cover art
+
+`/api/range` (and the year-in-review payload) attach an `"art"` cover id to each top
+track / artist / album, or `null` when the item is not in the library. Matching runs on
+normalized names — casefolded, diacritics and punctuation stripped, edition suffixes
+(`(Deluxe)`, `(20th Anniversary Edition)`) trimmed, and collaboration credits split on
+`; , & feat. ft.` — so `Denzel Curry & Kenneth Blume` still finds Denzel Curry's
+portrait. Navidrome MBIDs are deliberately not trusted first: its artist table contains
+its own pseudo-artists for collaboration credits. Albums are matched by name with the
+artist as a tie-break; artists fall back to the lead credit only, since showing a
+collaborator's portrait would be wrong. Images are fetched once per id and size into a
+small in-memory LRU, and the browser caches them for 30 days.
 
 ## Deployment
 
@@ -167,6 +194,7 @@ unwrapped/
 ├── requirements.txt
 ├── backend/
 │   ├── main.py              # FastAPI app & routes
+│   ├── art.py               # ArtIndex: cover-art mirror
 │   ├── database.py          # async SQLite manager
 │   ├── lb_client.py         # ListenBrainz client
 │   ├── navidrome_client.py  # Navidrome/Subsonic client

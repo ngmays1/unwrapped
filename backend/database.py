@@ -45,6 +45,23 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Cover-art index mirrored from the Navidrome library. Purely additive:
+            # the site runs fine when this table is empty (no art is shown).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS nav_art (
+                    cover_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    norm_name TEXT NOT NULL,
+                    artist TEXT NOT NULL DEFAULT '',
+                    mbid TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nav_art_lookup ON nav_art(kind, norm_name)"
+            )
             await db.commit()
 
     async def get_meta(self, key: str) -> str | None:
@@ -72,6 +89,31 @@ class DatabaseManager:
 
     async def set_last_sync_ts(self, ts: int):
         await self.set_meta("last_sync_ts", str(ts))
+
+    async def replace_nav_art(self, rows: list[tuple[str, str, str, str, str, str]]):
+        """Swap the whole cover-art index.
+
+        Each row is (cover_id, kind, name, norm_name, artist, mbid).
+        """
+        await self.init_db()
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._exec_pragmas(db)
+            await db.execute("DELETE FROM nav_art")
+            await db.executemany(
+                "INSERT OR REPLACE INTO nav_art (cover_id, kind, name, norm_name, artist, mbid) "
+                "VALUES (?,?,?,?,?,?)",
+                rows,
+            )
+            await db.commit()
+
+    async def get_nav_art(self) -> list[tuple[str, str, str, str, str, str]]:
+        await self.init_db()
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._exec_pragmas(db)
+            async with db.execute(
+                "SELECT cover_id, kind, name, norm_name, artist, mbid FROM nav_art"
+            ) as cur:
+                return list(await cur.fetchall())
 
     async def get_first_listen_ts(self) -> int | None:
         await self.init_db()

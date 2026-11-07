@@ -36,6 +36,25 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
+  // Artist portraits come from the local Navidrome library via the backend.
+  function coverId(item) {
+    const art = item && item.art;
+    return typeof art === "string" && art ? art : null;
+  }
+
+  function rankArt(cover) {
+    const img = document.createElement("img");
+    img.className = "rank-art";
+    img.src = `/api/art/${encodeURIComponent(cover)}?size=128`;
+    img.alt = "";
+    img.width = 40;
+    img.height = 40;
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.addEventListener("error", () => img.replaceWith(create("span", "rank-art")));
+    return img;
+  }
+
   function formatNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? numberFormat.format(number) : "0";
@@ -252,10 +271,17 @@
       artistsSection.append(create("h2", null, "Most played artists"));
 
       const list = create("ol", "rank-list");
+      const artists = topArtists.slice(0, 5);
+      const withArt = artists.some((item) => coverId(item));
+      if (withArt) list.classList.add("has-art");
 
-      topArtists.slice(0, 5).forEach((item, index) => {
+      artists.forEach((item, index) => {
         const count = Number(item.count) || 0;
         const row = create("li", "rank-item");
+        if (withArt) {
+          const cover = coverId(item);
+          row.append(cover ? rankArt(cover) : create("span", "rank-art"));
+        }
         row.append(create("span", "rank-number", String(index + 1)));
 
         const name = create("span", "rank-name");

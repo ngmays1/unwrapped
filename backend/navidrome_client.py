@@ -48,13 +48,51 @@ class NavidromeClient:
             "f": "json",
         }
 
-    async def get_now_playing(self) -> dict[str, Any]:
+    async def subsonic(self, endpoint: str, **params: Any) -> dict[str, Any]:
+        """Call a Subsonic endpoint and return the unwrapped response body."""
         await self._ensure_authenticated()
-        params = self._subsonic_params()
-        resp = await self.client.get(f"{self.base_url}/rest/getNowPlaying.view", params=params)
+        resp = await self.client.get(
+            f"{self.base_url}/rest/{endpoint}", params={**self._subsonic_params(), **params}
+        )
         resp.raise_for_status()
-        data = resp.json()
-        return data.get("subsonic-response", {})
+        return resp.json().get("subsonic-response", {}) or {}
+
+    async def get_now_playing(self) -> dict[str, Any]:
+        return await self.subsonic("getNowPlaying.view")
+
+    async def get_album_index(self, page_size: int = 500, max_pages: int = 40) -> list[dict[str, Any]]:
+        """Page through the whole album library (name, artist, coverArt, musicBrainzId)."""
+        albums: list[dict[str, Any]] = []
+        for page in range(max_pages):
+            data = await self.subsonic(
+                "getAlbumList2.view",
+                type="alphabeticalByName",
+                size=page_size,
+                offset=page * page_size,
+            )
+            batch = (data.get("albumList2") or {}).get("album") or []
+            albums.extend(batch)
+            if len(batch) < page_size:
+                break
+        return albums
+
+    async def get_artist_index(self) -> list[dict[str, Any]]:
+        """Return every artist entry (name, coverArt, musicBrainzId) in the library."""
+        data = await self.subsonic("getArtists.view")
+        artists: list[dict[str, Any]] = []
+        for index in (data.get("artists") or {}).get("index") or []:
+            artists.extend(index.get("artist") or [])
+        return artists
+
+    async def get_cover_art(self, cover_id: str, size: int = 128) -> tuple[str, bytes]:
+        """Fetch cover-art bytes. Returns (content_type, body)."""
+        await self._ensure_authenticated()
+        resp = await self.client.get(
+            f"{self.base_url}/rest/getCoverArt.view",
+            params={**self._subsonic_params(), "id": cover_id, "size": size},
+        )
+        resp.raise_for_status()
+        return resp.headers.get("content-type", "image/jpeg"), resp.content
 
     async def close(self):
         await self.client.aclose()

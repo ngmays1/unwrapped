@@ -641,6 +641,34 @@ select {
     white-space: nowrap;
 }
 
+/* Ranked lists that carry cover art gain a leading thumbnail column. Rows whose
+   object is not in the library keep the empty slot so the column stays aligned. */
+.rank-list.has-art .rank-item {
+    grid-template-columns: 40px 2rem minmax(0, 1fr) auto;
+    align-items: center;
+    padding-block: 10px;
+}
+
+.rank-list.has-art .rank-item:first-child {
+    padding-block: 12px;
+}
+
+.rank-art {
+    display: block;
+    width: 40px;
+    height: 40px;
+    align-self: center;
+    border: 0;
+    border-radius: 2px;
+    background: none;
+    object-fit: cover;
+}
+
+img.rank-art {
+    border: 1px solid var(--rule);
+    background: var(--paper);
+}
+
 .month-control {
     display: flex;
     flex-direction: column;
@@ -1250,6 +1278,16 @@ select {
 
     .rank-item {
         grid-template-columns: 2rem minmax(0, 1fr) auto;
+    }
+
+    .rank-list.has-art .rank-item {
+        grid-template-columns: 36px 1.5rem minmax(0, 1fr) auto;
+        column-gap: 10px;
+    }
+
+    .rank-art {
+        width: 36px;
+        height: 36px;
     }
 
     .listen-list li {

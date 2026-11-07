@@ -6,8 +6,22 @@ from .util import LOCAL_TZ
 
 
 class StatsEngine:
-    def __init__(self, db):
+    def __init__(self, db, art=None):
         self.db = db
+        self.art = art
+
+    def _art_for(self, kind: str, name: str | None, artist: str | None = None) -> str | None:
+        """Cover-art id for a ranked row, or None when it is not resolvable."""
+        if self.art is None:
+            return None
+        return self.art.art_for(kind, name, artist)
+
+    @staticmethod
+    def _dominant_album(votes: dict[str, int] | None) -> str | None:
+        """The album a track was most often played from."""
+        if not votes:
+            return None
+        return max(votes.items(), key=lambda x: x[1])[0] or None
 
     def _ts_to_local_date(self, ts: int) -> datetime:
         try:
@@ -57,6 +71,8 @@ class StatsEngine:
         track_counter: dict[tuple[str,str], int] = defaultdict(int)
         artist_counter: dict[str, int] = defaultdict(int)
         album_counter: dict[tuple[str,str], int] = defaultdict(int)
+        # A track can appear on several albums; keep the dominant one for art.
+        track_album: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for l in listens:
             track_key = (l.get("track_name") or "", l.get("artist_name") or "")
             artist_key = l.get("artist_name") or ""
@@ -64,17 +80,30 @@ class StatsEngine:
             track_counter[track_key] += 1
             artist_counter[artist_key] += 1
             album_counter[album_key] += 1
+            track_album[track_key][l.get("album_name") or ""] += 1
 
         top_tracks = [
-            {"track": t[0][0], "artist": t[0][1], "count": t[1]}
+            {
+                "track": t[0][0],
+                "artist": t[0][1],
+                "count": t[1],
+                "art": self._art_for(
+                    "album", self._dominant_album(track_album.get(t[0])), t[0][1]
+                ),
+            }
             for t in sorted(track_counter.items(), key=lambda x: x[1], reverse=True)[:25]
         ]
         top_artists = [
-            {"artist": a[0], "count": a[1]}
+            {"artist": a[0], "count": a[1], "art": self._art_for("artist", a[0])}
             for a in sorted(artist_counter.items(), key=lambda x: x[1], reverse=True)[:25]
         ]
         top_albums = [
-            {"album": al[0][0], "artist": al[0][1], "count": al[1]}
+            {
+                "album": al[0][0],
+                "artist": al[0][1],
+                "count": al[1],
+                "art": self._art_for("album", al[0][0], al[0][1]),
+            }
             for al in sorted(album_counter.items(), key=lambda x: x[1], reverse=True)[:25]
         ]
 

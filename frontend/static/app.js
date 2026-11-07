@@ -46,6 +46,28 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
+  // Cover art is served by the backend from the local Navidrome library. Items
+  // the library does not have simply come back without an "art" id.
+  function coverId(item) {
+    const art = item && item.art;
+    return typeof art === "string" && art ? art : null;
+  }
+
+  function rankArt(cover) {
+    const img = document.createElement("img");
+    img.className = "rank-art";
+    img.src = `/api/art/${encodeURIComponent(cover)}?size=128`;
+    img.alt = "";
+    img.width = 40;
+    img.height = 40;
+    img.loading = "lazy";
+    img.decoding = "async";
+    // A missing or unreachable image falls back to the empty slot, not a broken
+    // icon, and keeps the grid column intact.
+    img.addEventListener("error", () => img.replaceWith(create("span", "rank-art")));
+    return img;
+  }
+
   function formatNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? numberFormat.format(number) : "0";
@@ -267,8 +289,12 @@
     }
 
     const list = create("ol", "rank-list");
+    const rows = items.slice(0, 10);
+    // Reserve the thumbnail column only when at least one row has cover art.
+    const withArt = rows.some((item) => coverId(item));
+    if (withArt) list.classList.add("has-art");
 
-    items.slice(0, 10).forEach((item, index) => {
+    rows.forEach((item, index) => {
       let title = "";
       let meta = "";
       if (kind === "artists") {
@@ -283,6 +309,10 @@
 
       const count = Number(item.count) || 0;
       const row = create("li", "rank-item");
+      if (withArt) {
+        const cover = coverId(item);
+        row.append(cover ? rankArt(cover) : create("span", "rank-art"));
+      }
       row.append(create("span", "rank-number", String(index + 1)));
 
       const name = create("span", "rank-name");
