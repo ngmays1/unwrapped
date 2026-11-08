@@ -146,6 +146,82 @@ class DatabaseManager:
                 ))
             await db.commit()
 
+    @staticmethod
+    def _like_pattern(value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
+    async def search_tracks(self, query: str, limit: int = 15) -> list[dict[str, Any]]:
+        await self.init_db()
+        params: list[Any] = []
+        if query:
+            pattern = self._like_pattern(query)
+            where = (
+                "WHERE COALESCE(l.track_name, '') != '' "
+                "AND (l.track_name LIKE ? ESCAPE '\\' OR l.artist_name LIKE ? ESCAPE '\\')"
+            )
+            params.extend([pattern, pattern])
+            order = "plays DESC, last_ts DESC"
+        else:
+            where = "WHERE COALESCE(l.track_name, '') != ''"
+            order = "last_ts DESC"
+        params.append(limit)
+        sql = f"""
+            SELECT l.track_name,
+                   COALESCE(l.artist_name, '') AS artist_name,
+                   COUNT(*) AS plays,
+                   MIN(l.listened_at) AS first_ts,
+                   MAX(l.listened_at) AS last_ts,
+                   (SELECT l2.album_name
+                      FROM listens l2
+                     WHERE l2.track_name = l.track_name
+                       AND COALESCE(l2.artist_name, '') = COALESCE(l.artist_name, '')
+                       AND COALESCE(l2.album_name, '') != ''
+                     GROUP BY l2.album_name
+                     ORDER BY COUNT(*) DESC, MAX(l2.listened_at) DESC
+                     LIMIT 1) AS album_name
+              FROM listens l
+              {where}
+             GROUP BY l.track_name, COALESCE(l.artist_name, '')
+             ORDER BY {order}
+             LIMIT ?
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._exec_pragmas(db)
+            async with db.execute(sql, params) as cur:
+                rows = await cur.fetchall()
+                return [
+                    {
+                        "track": r[0],
+                        "artist": r[1],
+                        "plays": r[2],
+                        "first_listen_ts": r[3],
+                        "last_listen_ts": r[4],
+                        "album_name": r[5] or "",
+                    }
+                    for r in rows
+                ]
+
+    async def get_track_listens(self, track: str, artist: str) -> list[dict[str, Any]]:
+        await self.init_db()
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._exec_pragmas(db)
+            async with db.execute(
+                "SELECT listened_at, album_name, duration_ms FROM listens "
+                "WHERE track_name = ? AND COALESCE(artist_name, '') = ? "
+                "ORDER BY listened_at ASC",
+                (track, artist or ""),
+            ) as cur:
+                rows = await cur.fetchall()
+                return [
+                    {
+                        "listened_at": r[0],
+                        "album_name": r[1] or "",
+                        "duration_ms": r[2] or 0,
+                    }
+                    for r in rows
+                ]
+
     async def query_listens(self, start_ts: int | None, end_ts: int | None, limit: int | None = None) -> list[dict[str, Any]]:
         await self.init_db()
         clauses = []

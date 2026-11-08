@@ -13,8 +13,13 @@ FastAPI + vanilla-JS web UI.
 - **On this day**: listens from the same calendar day in previous years, grouped by
   year and loaded as an HTML fragment.
 - **Monthly recap**: per-month summary with daily breakdown, loaded as an HTML fragment.
-- **Year in review**: locally computed year stats by default, with an optional
-  ListenBrainz year-in-review source on the API.
+- **Track history**: search the archive by track or artist to see first and last plays,
+  total listening time, busiest days and weeks, a monthly rotation chart, a weekday x
+  hour heatmap, and recent plays.
+- **Year in review**: an editorial keepsake with cover-art sleeves, top artist and
+  record features, a day-by-day listening waveform, monthly and hourly charts, and a
+  top-tracks and top-albums catalog. Stats are locally computed by default, with an
+  optional ListenBrainz year-in-review source on the API.
 - **Live endpoints**: Navidrome now-playing over `/api/live/now-playing` and a polling
   WebSocket at `/ws/live`; the dashboard itself does not surface them.
 - **Cover art**: album art and artist portraits in the top tracks / artists / albums
@@ -137,6 +142,9 @@ cached art ids still resolve, and the images simply drop out of the lists.
 | --- | --- | --- |
 | `GET` | `/` | Explore dashboard page |
 | `GET` | `/wrapped/{year}` | Year-in-review page |
+| `GET` | `/tracks` | Track history search page |
+| `GET` | `/api/tracks/search` | Track search grouped by track and artist (`q`, `limit` 1-50, default 15) |
+| `GET` | `/api/tracks/detail` | Single-track breakdown (`track`, `artist`) |
 | `GET` | `/api/range` | Aggregate stats for `from_`/`to_` (epoch seconds) |
 | `GET` | `/api/timeline` | Time series (`range` shorthand or `from_`/`to_`, `granularity=day\|week\|month`) |
 | `GET` | `/api/on-this-day` | HTML fragment of listens on this day in previous years (`years`, 1-20, default 5) |
@@ -204,9 +212,11 @@ unwrapped/
 └── frontend/
     ├── templates/
     │   ├── index.html
+    │   ├── tracks.html
     │   └── wrapped.html
     └── static/
         ├── app.js
+        ├── tracks.js
         ├── wrapped.js
         ├── style.css
         ├── favicon.svg

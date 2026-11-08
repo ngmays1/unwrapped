@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#f4efe4">
+    <meta name="description" content="Search your listening archive for a track and see when you first and last played it.">
+    <title>unwrapped: track history</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preload" href="/static/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+        <div class="container header-inner">
+            <a class="wordmark" href="/">unwrapped</a>
+            <nav class="site-nav" aria-label="Primary">
+                <a href="/">Explore</a>
+                <a href="/tracks" aria-current="page">Tracks</a>
+                <a href="/wrapped/{{ current_year }}">Wrapped</a>
+            </nav>
+        </div>
+    </header>
+
+    <main id="main" class="container" tabindex="-1">
+        <noscript>
+            <p class="empty-state">This page needs JavaScript to search your listening history. <a href="/">Open the listening archive</a> instead.</p>
+        </noscript>
+
+        <section class="intro" aria-labelledby="page-title">
+            <p class="kicker">Track history</p>
+            <h1 id="page-title">When you heard it.</h1>
+            <p class="intro-summary">Search the archive by track or artist. See the first and last play, the busiest days and weeks, and the hours you keep coming back.</p>
+        </section>
+
+        <div class="tracks-layout">
+            <section class="track-search" aria-labelledby="track-search-title">
+                <h2 id="track-search-title">Find a track</h2>
+                <form class="track-search-form" id="track-search-form" role="search">
+                    <label for="track-query">Search your archive</label>
+                    <input type="search" id="track-query" name="q" placeholder="Track or artist" autocomplete="off" spellcheck="false">
+                </form>
+                <p class="track-search-status" id="track-search-status" aria-live="polite"></p>
+                <div class="track-results" id="track-results"></div>
+                <div class="track-search-error" id="track-search-error" role="alert" hidden></div>
+            </section>
+
+            <section class="track-detail" id="track-detail" aria-live="polite" aria-busy="false">
+                <p class="empty-state">Pick a track to see when you first and last played it.</p>
+            </section>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container footer-inner">
+            <p>unwrapped. Built from your ListenBrainz history.</p>
+            <p><a href="/">Back to the listening archive</a></p>
+        </div>
+    </footer>
+
+    <script src="/static/vendor/echarts.min.js" defer></script>
+    <script src="/static/tracks.js" defer></script>
+</body>
+</html>

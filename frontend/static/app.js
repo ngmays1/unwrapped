@@ -316,7 +316,17 @@
       row.append(create("span", "rank-number", String(index + 1)));
 
       const name = create("span", "rank-name");
-      name.append(create("span", "rank-title", title));
+      if (kind === "tracks") {
+        const params = new URLSearchParams({
+          track: item.track || "",
+          artist: item.artist || "",
+        });
+        const link = create("a", "rank-title", title);
+        link.href = `/tracks?${params.toString()}`;
+        name.append(link);
+      } else {
+        name.append(create("span", "rank-title", title));
+      }
       if (meta) name.append(create("span", "rank-meta", meta));
       row.append(name);
       row.append(

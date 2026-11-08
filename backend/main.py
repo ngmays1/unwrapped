@@ -322,12 +322,35 @@ async def wrapped_page(request: Request, year: int):
     return templates.TemplateResponse("wrapped.html", {"request": request, "year": year})
 
 
+@app.get("/tracks", response_class=HTMLResponse)
+async def tracks_page(request: Request):
+    current_year = datetime.now(tz=LOCAL_TZ).year
+    return templates.TemplateResponse(
+        "tracks.html", {"request": request, "current_year": current_year}
+    )
+
+
 @app.get("/api/range")
 async def api_range(from_: str | None = None, to_: str | None = None):
     start_ts = int(from_) if from_ else None
     end_ts = int(to_) if to_ else None
     s = await stats_engine.range_stats(start_ts, end_ts)
     return s
+
+
+@app.get("/api/tracks/search")
+async def api_tracks_search(q: str = "", limit: int = 15):
+    limit = max(1, min(limit, 50))
+    results = await stats_engine.track_search(q.strip(), limit)
+    return {"query": q, "results": results}
+
+
+@app.get("/api/tracks/detail")
+async def api_tracks_detail(track: str, artist: str = ""):
+    detail = await stats_engine.track_detail(track, artist)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="track not found")
+    return detail
 
 
 @app.get("/api/art/{cover_id}")
